@@ -84,22 +84,55 @@ class ZendeskClient:
         except Exception as e:
             raise Exception(f"Failed to post comment on ticket {ticket_id}: {str(e)}")
 
-    def get_tickets(self, page: int = 1, per_page: int = 25, sort_by: str = 'created_at', sort_order: str = 'desc') -> Dict[str, Any]:
+    def get_tickets(
+        self,
+        page: int = 1,
+        per_page: int = 25,
+        sort_by: str = 'created_at',
+        sort_order: str = 'desc',
+        organization_id: int | None = None,
+        user_id: int | None = None,
+        ticket_type: str | None = None,
+        recent: bool = False
+    ) -> Dict[str, Any]:
         """
-        Get the latest tickets with proper pagination support using direct API calls.
+        Get tickets with proper pagination support using direct API calls.
+        Supports filtering by organization, user, ticket type, and recent tickets.
 
         Args:
             page: Page number (1-based)
             per_page: Number of tickets per page (max 100)
             sort_by: Field to sort by (created_at, updated_at, priority, status)
             sort_order: Sort order (asc or desc)
+            organization_id: Filter tickets by organization ID
+            user_id: Filter tickets by user ID (requires ticket_type)
+            ticket_type: Type of tickets for user ('requested', 'ccd', 'followed', 'assigned')
+            recent: If True, fetch only tickets created/updated in last 30 days
 
         Returns:
             Dict containing tickets and pagination info
         """
         try:
+            # Validate parameters
+            if user_id and not ticket_type:
+                raise ValueError("ticket_type is required when user_id is provided")
+            if ticket_type and not user_id:
+                raise ValueError("user_id is required when ticket_type is provided")
+            if ticket_type and ticket_type not in ['requested', 'ccd', 'followed', 'assigned']:
+                raise ValueError(f"Invalid ticket_type: {ticket_type}. Must be one of: requested, ccd, followed, assigned")
+
             # Cap at reasonable limit
             per_page = min(per_page, 100)
+
+            # Build base URL based on filters
+            if recent:
+                base_path = "/tickets/recent"
+            elif organization_id:
+                base_path = f"/organizations/{organization_id}/tickets"
+            elif user_id and ticket_type:
+                base_path = f"/users/{user_id}/tickets/{ticket_type}"
+            else:
+                base_path = "/tickets"
 
             # Build URL with parameters for offset pagination
             params = {
@@ -109,7 +142,7 @@ class ZendeskClient:
                 'sort_order': sort_order
             }
             query_string = urllib.parse.urlencode(params)
-            url = f"{self.base_url}/tickets.json?{query_string}"
+            url = f"{self.base_url}{base_path}.json?{query_string}"
 
             # Create request with auth header
             req = urllib.request.Request(url)
@@ -150,9 +183,9 @@ class ZendeskClient:
             }
         except urllib.error.HTTPError as e:
             error_body = e.read().decode() if e.fp else "No response body"
-            raise Exception(f"Failed to get latest tickets: HTTP {e.code} - {e.reason}. {error_body}")
+            raise Exception(f"Failed to get tickets: HTTP {e.code} - {e.reason}. {error_body}")
         except Exception as e:
-            raise Exception(f"Failed to get latest tickets: {str(e)}")
+            raise Exception(f"Failed to get tickets: {str(e)}")
 
     def get_all_articles(self) -> Dict[str, Any]:
         """
@@ -283,3 +316,170 @@ class ZendeskClient:
             }
         except Exception as e:
             raise Exception(f"Failed to update ticket {ticket_id}: {str(e)}")
+
+    def list_users(
+        self,
+        page: int = 1,
+        per_page: int = 25,
+        sort_by: str = 'name',
+        sort_order: str = 'asc',
+        group_id: int | None = None,
+        organization_id: int | None = None
+    ) -> Dict[str, Any]:
+        """
+        List users with pagination support. Supports filtering by group or organization.
+
+        Args:
+            page: Page number (1-based)
+            per_page: Number of users per page (max 100)
+            sort_by: Field to sort by (name, created_at, updated_at)
+            sort_order: Sort order (asc or desc)
+            group_id: Filter users by group ID
+            organization_id: Filter users by organization ID
+
+        Returns:
+            Dict containing users and pagination info
+        """
+        try:
+            # Cap at reasonable limit
+            per_page = min(per_page, 100)
+
+            # Build base URL based on filters
+            if group_id:
+                base_path = f"/groups/{group_id}/users"
+            elif organization_id:
+                base_path = f"/organizations/{organization_id}/users"
+            else:
+                base_path = "/users"
+
+            # Build URL with parameters
+            params = {
+                'page': str(page),
+                'per_page': str(per_page),
+                'sort_by': sort_by,
+                'sort_order': sort_order
+            }
+            query_string = urllib.parse.urlencode(params)
+            url = f"{self.base_url}{base_path}.json?{query_string}"
+
+            # Create request with auth header
+            req = urllib.request.Request(url)
+            req.add_header('Authorization', self.auth_header)
+            req.add_header('Content-Type', 'application/json')
+
+            # Make the API request
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+
+            users_data = data.get('users', [])
+
+            # Process users to return essential fields
+            user_list = []
+            for user in users_data:
+                user_list.append({
+                    'id': user.get('id'),
+                    'name': user.get('name'),
+                    'email': user.get('email'),
+                    'role': user.get('role'),
+                    'active': user.get('active'),
+                    'created_at': user.get('created_at'),
+                    'updated_at': user.get('updated_at'),
+                    'organization_id': user.get('organization_id')
+                })
+
+            return {
+                'users': user_list,
+                'page': page,
+                'per_page': per_page,
+                'count': len(user_list),
+                'sort_by': sort_by,
+                'sort_order': sort_order,
+                'has_more': data.get('next_page') is not None,
+                'next_page': page + 1 if data.get('next_page') else None,
+                'previous_page': page - 1 if data.get('previous_page') and page > 1 else None
+            }
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "No response body"
+            raise Exception(f"Failed to list users: HTTP {e.code} - {e.reason}. {error_body}")
+        except Exception as e:
+            raise Exception(f"Failed to list users: {str(e)}")
+
+    def search_users(
+        self,
+        query: str | None = None,
+        external_id: str | None = None,
+        page: int = 1,
+        per_page: int = 25
+    ) -> Dict[str, Any]:
+        """
+        Search for users by query or external ID.
+
+        Args:
+            query: Search query using Zendesk search syntax
+            external_id: External ID of the user
+            page: Page number (1-based)
+            per_page: Number of users per page (max 100)
+
+        Returns:
+            Dict containing users and pagination info
+        """
+        try:
+            if not query and not external_id:
+                raise ValueError("Either 'query' or 'external_id' must be provided")
+
+            # Cap at reasonable limit
+            per_page = min(per_page, 100)
+
+            # Build URL with parameters
+            params = {
+                'page': str(page),
+                'per_page': str(per_page)
+            }
+            if query:
+                params['query'] = query
+            if external_id:
+                params['external_id'] = external_id
+
+            query_string = urllib.parse.urlencode(params)
+            url = f"{self.base_url}/users/search.json?{query_string}"
+
+            # Create request with auth header
+            req = urllib.request.Request(url)
+            req.add_header('Authorization', self.auth_header)
+            req.add_header('Content-Type', 'application/json')
+
+            # Make the API request
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+
+            users_data = data.get('users', [])
+
+            # Process users to return essential fields
+            user_list = []
+            for user in users_data:
+                user_list.append({
+                    'id': user.get('id'),
+                    'name': user.get('name'),
+                    'email': user.get('email'),
+                    'role': user.get('role'),
+                    'active': user.get('active'),
+                    'created_at': user.get('created_at'),
+                    'updated_at': user.get('updated_at'),
+                    'organization_id': user.get('organization_id'),
+                    'external_id': user.get('external_id')
+                })
+
+            return {
+                'users': user_list,
+                'page': page,
+                'per_page': per_page,
+                'count': len(user_list),
+                'has_more': data.get('next_page') is not None,
+                'next_page': page + 1 if data.get('next_page') else None,
+                'previous_page': page - 1 if data.get('previous_page') and page > 1 else None
+            }
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "No response body"
+            raise Exception(f"Failed to search users: HTTP {e.code} - {e.reason}. {error_body}")
+        except Exception as e:
+            raise Exception(f"Failed to search users: {str(e)}")

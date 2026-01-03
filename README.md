@@ -8,6 +8,7 @@ A Model Context Protocol server for Zendesk.
 This server provides a comprehensive integration with Zendesk. It offers:
 
 - Tools for retrieving and managing Zendesk tickets and comments
+- Tools for listing and searching Zendesk users
 - Specialized prompts for ticket analysis and response drafting
 - Full access to the Zendesk Help Center articles as knowledge base
 
@@ -98,15 +99,25 @@ Draft a response to a Zendesk ticket.
 
 ### get_tickets
 
-Fetch the latest tickets with pagination support
+Fetch tickets with pagination support. Supports filtering by organization, user, ticket type, or recent tickets.
 
 - Input:
   - `page` (integer, optional): Page number (defaults to 1)
   - `per_page` (integer, optional): Number of tickets per page, max 100 (defaults to 25)
   - `sort_by` (string, optional): Field to sort by - created_at, updated_at, priority, or status (defaults to created_at)
   - `sort_order` (string, optional): Sort order - asc or desc (defaults to desc)
+  - `organization_id` (integer, optional): Filter tickets by organization ID
+  - `user_id` (integer, optional): Filter tickets by user ID (requires `ticket_type`)
+  - `ticket_type` (string, optional): Type of tickets to fetch for a user - one of `requested`, `ccd`, `followed`, or `assigned` (requires `user_id`)
+  - `recent` (boolean, optional): If true, fetch only tickets created or updated in the last 30 days (defaults to false)
 
 - Output: Returns a list of tickets with essential fields including id, subject, status, priority, description, timestamps, and assignee information, along with pagination metadata
+
+- Examples:
+  - Get all tickets: `get_tickets(page=1, per_page=25)`
+  - Get tickets for an organization: `get_tickets(organization_id=123)`
+  - Get tickets requested by a user: `get_tickets(user_id=456, ticket_type="requested")`
+  - Get recent tickets: `get_tickets(recent=true)`
 
 ### get_ticket
 
@@ -160,3 +171,38 @@ Update fields on an existing Zendesk ticket (e.g., status, priority, assignee)
   - `tags` (array[string], optional)
   - `custom_fields` (array[object], optional)
   - `due_at` (string, optional): ISO8601 datetime
+
+### list_users
+
+List users with pagination support. Supports filtering by group or organization.
+
+- Input:
+  - `page` (integer, optional): Page number (defaults to 1)
+  - `per_page` (integer, optional): Number of users per page, max 100 (defaults to 25)
+  - `sort_by` (string, optional): Field to sort by - name, created_at, or updated_at (defaults to name)
+  - `sort_order` (string, optional): Sort order - asc or desc (defaults to asc)
+  - `group_id` (integer, optional): Filter users by group ID
+  - `organization_id` (integer, optional): Filter users by organization ID
+
+- Output: Returns a list of users with essential fields including id, name, email, role, active status, timestamps, and organization information, along with pagination metadata
+
+- Examples:
+  - Get all users: `list_users(page=1, per_page=25)`
+  - Get users in a group: `list_users(group_id=123)`
+  - Get users in an organization: `list_users(organization_id=456)`
+
+### search_users
+
+Search for users by query or external ID.
+
+- Input:
+  - `query` (string, optional): Search query using Zendesk search syntax (e.g., "name:John email:john@example.com"). Either `query` or `external_id` must be provided.
+  - `external_id` (string, optional): External ID of the user to search for. Either `query` or `external_id` must be provided.
+  - `page` (integer, optional): Page number (defaults to 1)
+  - `per_page` (integer, optional): Number of users per page, max 100 (defaults to 25)
+
+- Output: Returns a list of matching users with essential fields including id, name, email, role, active status, timestamps, organization information, and external_id, along with pagination metadata
+
+- Examples:
+  - Search by query: `search_users(query="name:John")`
+  - Search by external ID: `search_users(external_id="ext_123")`

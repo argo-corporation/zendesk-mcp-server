@@ -160,7 +160,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_tickets",
-            description="Fetch the latest tickets with pagination support",
+            description="Fetch tickets with pagination support. Supports filtering by organization, user, or ticket type (requested, ccd, followed, assigned, recent)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -183,6 +183,24 @@ async def handle_list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": "Sort order (asc or desc)",
                         "default": "desc"
+                    },
+                    "organization_id": {
+                        "type": "integer",
+                        "description": "Filter tickets by organization ID"
+                    },
+                    "user_id": {
+                        "type": "integer",
+                        "description": "Filter tickets by user ID (requires ticket_type)"
+                    },
+                    "ticket_type": {
+                        "type": "string",
+                        "description": "Type of tickets to fetch for a user: 'requested', 'ccd', 'followed', or 'assigned'. Requires user_id.",
+                        "enum": ["requested", "ccd", "followed", "assigned"]
+                    },
+                    "recent": {
+                        "type": "boolean",
+                        "description": "If true, fetch only tickets created or updated in the last 30 days",
+                        "default": False
                     }
                 },
                 "required": []
@@ -244,6 +262,72 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
                 "required": ["ticket_id"]
             }
+        ),
+        types.Tool(
+            name="list_users",
+            description="List users with pagination support. Supports filtering by group or organization",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number",
+                        "default": 1
+                    },
+                    "per_page": {
+                        "type": "integer",
+                        "description": "Number of users per page (max 100)",
+                        "default": 25
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "description": "Field to sort by (name, created_at, updated_at)",
+                        "default": "name"
+                    },
+                    "sort_order": {
+                        "type": "string",
+                        "description": "Sort order (asc or desc)",
+                        "default": "asc"
+                    },
+                    "group_id": {
+                        "type": "integer",
+                        "description": "Filter users by group ID"
+                    },
+                    "organization_id": {
+                        "type": "integer",
+                        "description": "Filter users by organization ID"
+                    }
+                },
+                "required": []
+            }
+        ),
+        types.Tool(
+            name="search_users",
+            description="Search for users by query or external ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query using Zendesk search syntax (e.g., 'name:John email:john@example.com')"
+                    },
+                    "external_id": {
+                        "type": "string",
+                        "description": "External ID of the user to search for"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number",
+                        "default": 1
+                    },
+                    "per_page": {
+                        "type": "integer",
+                        "description": "Number of users per page (max 100)",
+                        "default": 25
+                    }
+                },
+                "required": []
+            }
         )
     ]
 
@@ -287,12 +371,20 @@ async def handle_call_tool(
             per_page = arguments.get("per_page", 25) if arguments else 25
             sort_by = arguments.get("sort_by", "created_at") if arguments else "created_at"
             sort_order = arguments.get("sort_order", "desc") if arguments else "desc"
+            organization_id = arguments.get("organization_id") if arguments else None
+            user_id = arguments.get("user_id") if arguments else None
+            ticket_type = arguments.get("ticket_type") if arguments else None
+            recent = arguments.get("recent", False) if arguments else False
 
             tickets = zendesk_client.get_tickets(
                 page=page,
                 per_page=per_page,
                 sort_by=sort_by,
-                sort_order=sort_order
+                sort_order=sort_order,
+                organization_id=organization_id,
+                user_id=user_id,
+                ticket_type=ticket_type,
+                recent=recent
             )
             return [types.TextContent(
                 type="text",
@@ -334,6 +426,47 @@ async def handle_call_tool(
             return [types.TextContent(
                 type="text",
                 text=json.dumps({"message": "Ticket updated successfully", "ticket": updated}, indent=2)
+            )]
+
+        elif name == "list_users":
+            page = arguments.get("page", 1) if arguments else 1
+            per_page = arguments.get("per_page", 25) if arguments else 25
+            sort_by = arguments.get("sort_by", "name") if arguments else "name"
+            sort_order = arguments.get("sort_order", "asc") if arguments else "asc"
+            group_id = arguments.get("group_id") if arguments else None
+            organization_id = arguments.get("organization_id") if arguments else None
+
+            users = zendesk_client.list_users(
+                page=page,
+                per_page=per_page,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                group_id=group_id,
+                organization_id=organization_id
+            )
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(users, indent=2)
+            )]
+
+        elif name == "search_users":
+            query = arguments.get("query") if arguments else None
+            external_id = arguments.get("external_id") if arguments else None
+            page = arguments.get("page", 1) if arguments else 1
+            per_page = arguments.get("per_page", 25) if arguments else 25
+
+            if not query and not external_id:
+                raise ValueError("Either 'query' or 'external_id' must be provided")
+
+            users = zendesk_client.search_users(
+                query=query,
+                external_id=external_id,
+                page=page,
+                per_page=per_page
+            )
+            return [types.TextContent(
+                type="text",
+                text=json.dumps(users, indent=2)
             )]
 
         else:
